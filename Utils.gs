@@ -20,3 +20,14 @@ function showYesNoCancel(title, text) {
      text,
       ui.ButtonSet.YES_NO_CANCEL);
 }
+
+function isEmptyArrays(arrays) {
+  if(arrays.constructor === Array && arrays.length > 0) {
+    for(var i=0;i<arrays.length;i++) {
+      if(arrays[i].length > 0 && (arrays[i][0] != "")) {
+          return false; 
+      }
+    }
+  }
+  return true;
+}
