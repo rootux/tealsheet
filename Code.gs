@@ -1,30 +1,67 @@
 //TODO - If there is a time condition user change and closes the app then it fails - we need to have a priodic "Syncing between backup and helper somehow"
 //TODO - ranges protection can be multiple cells and not one by one for each row there is 7 can be 1 or 2. A:C E:K for example
+//TODO - Anonymouse user can edit what they want
 
 /* Deploy Instructions:
 // 1.Duplicate Master-> Helper
 // 2.Protect Helper
-// 3.Protect Master first row
-// 4.Protect Master (With except)
+// 3.Hide Helper
+// 4.Protect Master first row
+// 5.Protect Master (With except)
 */
 
 var masterSheetName = "ראשי" // sheet where the cells are protected from updates
 var helperSheetName = "גיבוי" // sheet where the values are copied for later checking
-var taskCell = 'D';
-var creatorCol = 'E';
-var creatorEmailCol = 'F';
-var fillerCol = 'G';
-var fillerEmailCol = 'H';
-var descriptionCol = 'I';
-var creatorCommentsCol = 'J';
-var fillerPhoneCol = 'M';
-var taskStatusCol = 'N';
+
+var mainProtectionName = "Main";
+var labelsCol = 'B';
+var taskCell = 'C';
+var creatorCol = 'D';
+var creatorEmailCol = 'E';
+var fillerCol = 'F';
+var fillerEmailCol = 'G';
+var descriptionCol = 'H';
+var creatorCommentsCol = 'I';
+var fillerPhoneCol = 'L';
+var taskStatusCol = 'M';
+var extraCol = 'N';
+var extraCol2 = 'O';
+var communityCommentsCol = 'J';
+var contactsCol = 'K';
+
+
+// Translations
+var isEmailCorrect = "אנא בדקי שנית האם זה האימייל שלך?";
+var invalidEmail = "אימייל לא תקין\r\n";
+var emailMustBe = "\r\n האימייל צריך להיות\r\nburner@somecompany.com";
+var accessGranted = "יש לך כעת גישת עריכה";
+var editableColumns = "את יכולה כעת לערוך את העמודות הבאות בשורה:\r\n";
 
 var missionStringSize = 15; //Extract only part of the mission for the description
 
-var creatorField = 6; //"F"
-var fillerField = 8; //"H"
+var creatorField = 5; //"E"
+var fillerEmailField = 7; //"G"
+var communityCommentsField = 10; //"J"
+
 var ui = SpreadsheetApp.getUi();
+
+function removeAllProtection() {
+ var ss = SpreadsheetApp.getActive();
+ var protections = ss.getProtections(SpreadsheetApp.ProtectionType.RANGE);
+ for (var i = 0; i < protections.length; i++) {
+   var protection = protections[i];
+   protection.remove();
+ } 
+}
+
+function getMainProtection(protections) {
+  for(var i=0;i<protections.length; i++) {
+    if(protections[i].getDescription() === mainProtectionName) {
+      return protections[i];
+    }
+  }
+}
+
 
 /**
  * Test function for onEdit. Passes an event object to simulate an edit to
@@ -32,6 +69,7 @@ var ui = SpreadsheetApp.getUi();
  * Check for updates: https://stackoverflow.com/a/16089067/1677912
  */
 function test_onEdit() {
+  Logger.log("OnEdit");
   onEdit({
     user : Session.getActiveUser().getEmail(),
     source : SpreadsheetApp.getActiveSpreadsheet(),
@@ -39,6 +77,7 @@ function test_onEdit() {
     value : SpreadsheetApp.getActiveSpreadsheet().getActiveCell().getValue(),
     authMode : "LIMITED"
   });
+    Logger.log("OnEdit Finished");
 }
 
 function onEdit(e){
@@ -52,16 +91,18 @@ function onEdit(e){
   }
   
   var columnsToGiveAccess = [];
-  if(e.range.getColumn() === fillerField) {
-    columnsToGiveAccess = [fillerCol, fillerEmailCol, descriptionCol, fillerPhoneCol, taskStatusCol];
-  }else if(e.range.getColumn() === creatorField) {
-    columnsToGiveAccess = [fillerCol, fillerEmailCol, descriptionCol, fillerPhoneCol, taskStatusCol, creatorCol, creatorEmailCol, creatorCommentsCol];
+  if(e.range.getColumn() === fillerEmailField) {
+    columnsToGiveAccess = [labelsCol, fillerCol, fillerEmailCol, descriptionCol, fillerPhoneCol, taskStatusCol, extraCol, extraCol2];
   }
 
   // Only grant permissions if set this array
   if(columnsToGiveAccess.length > 0) {
     if(grantPermission(e, columnsToGiveAccess)) {
-      showAlert("Access granted","User can now edit those columns " + columnsToGiveAccess.toString());
+      unprotectRange(columnsToGiveAccess, e); //Set as unprotected in main sheet
+      // Popping the last two columns (Use as extra - should not be displayed)
+      columnsToGiveAccess.pop();
+      columnsToGiveAccess.pop();
+      showAlert(accessGranted, editableColumns + columnsToGiveAccess.toString());
     }
   }
 }
@@ -83,8 +124,11 @@ function onEdit(e){
   // unhide it by choosing View > Hidden sheets > Helper.
 function checkIfHasAccess(e) {
   var row = e.range.getRow();
+  
+  if(row.getColumn == fillerEmailField || row.getColumn == communityCommentsField) {
+   return true; //Anyone can edit the filler email field 
+  }
 
-  var creatorEmailContent = getCellContent(creatorEmailCol + row);
   var fillerEmailContent = getCellContent(fillerEmailCol + row);
   
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -104,15 +148,20 @@ function checkIfHasAccess(e) {
   var oldValue = helperRange.getValues();
   Logger.log("newValue " + newValue);
   Logger.log("oldValue " + oldValue);
+ 
+  var errorText = "";
+  if (fillerEmailContent == "") {
+    errorText = "This task doesn\'t have filler email yet";
+  }
   
-  if(creatorEmailContent == "" && fillerEmailContent == "") {
+  if(errorText) { 
     undoActiveRange();
-    showAlert("Can\'t edit","This task doesn\'t have creator email and filler yet");
+    showAlert("Can\'t edit",errorText);
     return false;
   }
   
+  // Apply changes to backup sheet
   helperRange.setValues(newValue);
-  
   return true;
 }
 
@@ -128,24 +177,19 @@ function undoActiveRange() {
 }
 
 function grantPermission(e, columnsToGiveAccess) {
+  Logger.log("Granting permission");
   var newValue = e.range.getValue(); //Better this then e.value which on copy return other results
   Logger.log("Value:" + e.value);
   Logger.log("Actual Value:" + newValue);
   Logger.log("Old Value:" + e.oldValue);
   
-/*  if(typeof(e.value) !== "string") {
-    Logger.log("Not string trying:");
-    Logger.log(e.value);
-   return; //TODO - what happenes when multiple cells, deleting a cell, Pasting a cell
-  }*/
-  
   if(!validateEmail(newValue)) {
     e.range.setValue(e.oldValue || '');
-    showAlert("","Invalid email " + newValue + " must be burner@somecompany.something");
+    showAlert("",invalidEmail + newValue + emailMustBe);
     return false;
   }
   
-  if(showYesNoCancel("Please Check if the email is correct?",newValue) != ui.Button.YES) {
+  if(showYesNoCancel(isEmailCorrect,newValue) != ui.Button.YES) {
     e.range.setValue(e.oldValue || '');
     return false;
   }
@@ -161,22 +205,39 @@ function grantPermission(e, columnsToGiveAccess) {
   if(newValue && !e.oldValue) {
       Logger.log("Value is inserted for the first time");
   }
+  Logger.log("Granted permission successfully");
   return true;
 }
 
-function getCellContent(cellName) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheets()[0];
-  var range = sheet.getRange(cellName);
-  return range.getCell(1,1).getValue();
+// Set all the needed unprotected columns
+function testUnprotectEmptycolumns() {
+  var columnsToUnprotect = [communityCommentsCol, contactsCol, fillerEmailCol];
+  unprotectRange(columnsToUnprotect);
 }
 
-// Can accept "A2:B3" for example OR "B5"
-function getRange(rangeName) {
+function unprotectRange(columnsToGiveAccess, e) {  
+  Logger.log("Unprotecting Range...");
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheets()[0];
-  return sheet.getRange(rangeName); 
+  var protections = ss.getProtections(SpreadsheetApp.ProtectionType.SHEET);  
+  var mainProtection = getMainProtection(protections);
+  assertOrThrow(mainProtection, "Cant find main protection");
+  Logger.log("Found main protection");
+  
+  var unprotectedArray = mainProtection.getUnprotectedRanges();
+  for(var i=0;i<columnsToGiveAccess.length;i++) {
+    var range;
+    if(e == null) { //Unprotect the whole row
+      range = getRange(columnsToGiveAccess[i] +":"+ columnsToGiveAccess[i]);
+    }else {
+      range = getRange(columnsToGiveAccess[i] + e.range.getRow());
+    }
+    unprotectedArray.push(range);
+  }
+  Logger.log(unprotectedArray);
+  mainProtection.setUnprotectedRanges(unprotectedArray);
+    Logger.log("Unprotected range successfully");
 }
+
 
 function protectRange(range, newEditorEmail) {
   // Get range task
@@ -184,16 +245,5 @@ function protectRange(range, newEditorEmail) {
   
   // TODO - Should not protect if already protected
   var protection = range.protect().setDescription(taskContent.substr(0, missionStringSize) + ' ' + newEditorEmail);
-
- // Ensure the current user is an editor before removing others. Otherwise, if the user's edit
- // permission comes from a group, the script will throw an exception upon removing the group.
- //var me = Session.getEffectiveUser();
- //protection.addEditor(me);
- protection.addEditor(newEditorEmail);
-   
- //protection.removeEditors(protection.getEditors());
- //if (protection.canDomainEdit()) {
-   //protection.setDomainEdit(false);
- //}
- 
+  protection.addEditor(newEditorEmail);
 }
