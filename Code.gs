@@ -1,19 +1,10 @@
-//TODO - If there is a time condition user change and closes the app then it fails - we need to have a priodic "Syncing between backup and helper somehow"
-//TODO - ranges protection can be multiple cells and not one by one for each row there is 7 can be 1 or 2. A:C E:K for example
-//TODO - Anonymouse user can edit what they want
-
 /* Deploy Instructions:
-// 1.Run once testRemoveAllProtection()
+// 1.Protect Master - Give it description 'Main'
 // 2.Run once testUnprotectEmptycolumns()
-// 3.Duplicate Master-> Helper
-// 4.Protect Helper
-// 5.Hide Helper
-// 6.Protect Master first row
-// 7.Protect Master (With except)
+// Then you can test with simulateOnEdit - Make sure you have an active sheet open
 */
 
 var masterSheetName = "ראשי" // sheet where the cells are protected from updates
-var helperSheetName = "גיבוי" // sheet where the values are copied for later checking
 
 var mainProtectionName = "Main";
 var labelsCol = 'B';
@@ -31,6 +22,8 @@ var extraCol2 = 'O';
 var communityCommentsCol = 'J';
 var contactsCol = 'K';
 
+var adminsEmails = ['galbra@gmail.com','orkin2@gmail.com', 'amenly@gmail.com', 'bakmic@gmail.com'];
+
 
 // Translations
 var isEmailCorrect = "אנא בדקי שנית האם זה האימייל שלך?";
@@ -41,7 +34,7 @@ var editableColumns = "את יכולה כעת לערוך את העמודות ה�
 
 var missionStringSize = 15; //Extract only part of the mission for the description
 
-var creatorField = 5; //"E"
+var creatorEmailField = 5; //"E"
 var fillerEmailField = 7; //"G"
 var communityCommentsField = 10; //"J"
 
@@ -58,7 +51,7 @@ function testRemoveAllProtection() {
 
 // Set all the needed unprotected columns
 function testUnprotectEmptycolumns() {
-  var columnsToUnprotect = [communityCommentsCol, contactsCol, fillerEmailCol];
+  var columnsToUnprotect = [communityCommentsCol, contactsCol];
   unprotectRange(columnsToUnprotect);
 }
 
@@ -70,9 +63,18 @@ function getMainProtection(protections) {
   }
 }
 
+// Add a custom menu to the spreadsheet.
+function onOpen() {
+  SpreadsheetApp.getUi() // Or DocumentApp or FormApp.
+      .createMenu('מידברנרות')
+      .addItem('הפעלי הרשאות', 'simulateOnEdit')
+      .addToUi();
+}
+
 // This needs to be bind to the "Current project trigger" To actually perform actions as the program admin
 // TODO - For anonymous user - cant use any user interface boxes - Try to identify and undo the operation
-function onEditAsAdmin(e) {  
+function onEditAsAdmin(e) {
+  Logger.log("On edit as admin");
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var masterSheet = ss.getActiveSheet();
   if (masterSheet.getName() != masterSheetName) return;
@@ -86,6 +88,8 @@ function onEditAsAdmin(e) {
   var columnsToGiveAccess = [];
   if(e.range.getColumn() === fillerEmailField) {
     columnsToGiveAccess = [labelsCol, fillerCol, fillerEmailCol, descriptionCol, fillerPhoneCol, taskStatusCol, extraCol, extraCol2];
+  }else if(e.range.getColumn() === creatorEmailField) {
+    columnsToGiveAccess = [labelsCol, fillerCol, fillerEmailCol, descriptionCol, fillerPhoneCol, taskStatusCol, extraCol, extraCol2, creatorCol, creatorCommentsCol];
   }
 
   // Only grant permissions if set this array
@@ -107,9 +111,12 @@ function onEditAsAdmin(e) {
  * a cell in a spreadsheet.
  * Check for updates: https://stackoverflow.com/a/16089067/1677912
  */
-function test_onEdit() {
+function simulateOnEdit() {
+  if(!isAdmin()) {
+    return
+  }
   Logger.log("OnEdit");
-  onEditAsAdmin({
+  onEdit({
     user : Session.getActiveUser().getEmail(),
     source : SpreadsheetApp.getActiveSpreadsheet(),
     range : SpreadsheetApp.getActiveSpreadsheet().getActiveCell(),
@@ -119,64 +126,37 @@ function test_onEdit() {
   Logger.log("OnEdit Finished");
 }
 
-
-/*
-// Don't use onEdit as it runs as the current logged in user and does not run when Anonymous user enters the sheet
-function onEdit(e){
-
+function isAdmin() {
+  var userEmail = Session.getActiveUser().getEmail();
+  for(var i=0;i<adminsEmails.length;i++) {
+    if(adminsEmails[i] === userEmail) {
+      return true;
+    }
+  }
+  return false;
 }
-*/ 
 
-  // This function prevents cells from being updated. When a user edits a cell on the master sheet,
-  // it is checked against the same cell on a helper sheet. If the value on the helper sheet is
-  // empty, the new value is stored on both sheets.
-  // If the value on the helper sheet is not empty, it is copied to the cell on the master sheet,
-  // effectively undoing the change.
-  // The exception is that the first few rows and the first few columns can be left free to edit by
-  // changing the firstDataRow and firstDataColumn variables below to greater than 1.
-  // To create the helper sheet, go to the master sheet and click the arrow in the sheet's tab at
-  // the tab bar at the bottom of the browser window and choose Duplicate, then rename the new sheet
-  // to Helper.
-  // To change a value that was entered previously, empty the corresponding cell on the helper sheet,
-  // then edit the cell on the master sheet.
-  // You can hide the helper sheet by clicking the arrow in the sheet's tab at the tab bar at the
-  // bottom of the browser window and choosing Hide Sheet from the pop-up menu, and when necessary,
-  // unhide it by choosing View > Hidden sheets > Helper.
+function onEdit(e){
+  Logger.log("On edit");
+  if(!isAdmin()) {
+      Logger.log("Not admin");
+    return;
+  }
+  return onEditAsAdmin(e);
+}
+
 function checkIfHasAccess(e) {
-  var row = e.range.getRow();
-  
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var masterSheet = ss.getActiveSheet();
   var masterRange = masterSheet.getActiveRange();
   
+  // TODO Should only be triggered if from menu
   if(masterRange.getHeight() > 1) {
-    undoActiveRange();
-    showAlert("Can\'t edit","Please edit one line at a time");
+//    showAlert("Can\'t edit","Please edit one line at a time");
     return false;
   }
   
-  var helperSheet = ss.getSheetByName(helperSheetName);
-  var helperRange = helperSheet.getRange(masterRange.getA1Notation());
-  var newValue = masterRange.getValues();
-  var oldValue = helperRange.getValues();
-  Logger.log("newValue " + newValue);
-  Logger.log("oldValue " + oldValue);
-  
-  // Apply changes to backup sheet
-  helperRange.setValues(newValue); 
-
   return true;
-}
-
-function undoActiveRange() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var masterSheet = ss.getActiveSheet();
-  var masterRange = masterSheet.getActiveRange();
-  var helperSheet = ss.getSheetByName(helperSheetName);
-  var helperRange = helperSheet.getRange(masterRange.getA1Notation());
-  var newValue = masterRange.getValues();
-  var oldValue = helperRange.getValues();
-  masterRange.setValues(oldValue);
 }
 
 function grantPermission(columnsToGiveAccess, e) {

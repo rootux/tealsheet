@@ -1,14 +1,12 @@
 function getCellContent(cellName) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheets()[0];
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   var range = sheet.getRange(cellName);
   return range.getCell(1,1).getValue();
 }
 
 // Can accept "A2:B3" for example OR "B5"
 function getRange(rangeName) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheets()[0];
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   return sheet.getRange(rangeName); 
 }
 
