@@ -3,11 +3,13 @@
 //TODO - Anonymouse user can edit what they want
 
 /* Deploy Instructions:
-// 1.Duplicate Master-> Helper
-// 2.Protect Helper
-// 3.Hide Helper
-// 4.Protect Master first row
-// 5.Protect Master (With except)
+// 1.Run once testRemoveAllProtection()
+// 2.Run once testUnprotectEmptycolumns()
+// 3.Duplicate Master-> Helper
+// 4.Protect Helper
+// 5.Hide Helper
+// 6.Protect Master first row
+// 7.Protect Master (With except)
 */
 
 var masterSheetName = "ראשי" // sheet where the cells are protected from updates
@@ -45,13 +47,19 @@ var communityCommentsField = 10; //"J"
 
 var ui = SpreadsheetApp.getUi();
 
-function removeAllProtection() {
+function testRemoveAllProtection() {
  var ss = SpreadsheetApp.getActive();
  var protections = ss.getProtections(SpreadsheetApp.ProtectionType.RANGE);
  for (var i = 0; i < protections.length; i++) {
    var protection = protections[i];
    protection.remove();
  } 
+}
+
+// Set all the needed unprotected columns
+function testUnprotectEmptycolumns() {
+  var columnsToUnprotect = [communityCommentsCol, contactsCol, fillerEmailCol];
+  unprotectRange(columnsToUnprotect);
 }
 
 function getMainProtection(protections) {
@@ -62,25 +70,9 @@ function getMainProtection(protections) {
   }
 }
 
-
-/**
- * Test function for onEdit. Passes an event object to simulate an edit to
- * a cell in a spreadsheet.
- * Check for updates: https://stackoverflow.com/a/16089067/1677912
- */
-function test_onEdit() {
-  Logger.log("OnEdit");
-  onEdit({
-    user : Session.getActiveUser().getEmail(),
-    source : SpreadsheetApp.getActiveSpreadsheet(),
-    range : SpreadsheetApp.getActiveSpreadsheet().getActiveCell(),
-    value : SpreadsheetApp.getActiveSpreadsheet().getActiveCell().getValue(),
-    authMode : "LIMITED"
-  });
-    Logger.log("OnEdit Finished");
-}
-
-function onEdit(e){
+// This needs to be bind to the "Current project trigger" To actually perform actions as the program admin
+// TODO - For anonymous user - cant use any user interface boxes - Try to identify and undo the operation
+function onEditAsAdmin(e) {  
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var masterSheet = ss.getActiveSheet();
   if (masterSheet.getName() != masterSheetName) return;
@@ -90,6 +82,7 @@ function onEdit(e){
     return;
   }
   
+  Logger.log("Have access");
   var columnsToGiveAccess = [];
   if(e.range.getColumn() === fillerEmailField) {
     columnsToGiveAccess = [labelsCol, fillerCol, fillerEmailCol, descriptionCol, fillerPhoneCol, taskStatusCol, extraCol, extraCol2];
@@ -97,15 +90,42 @@ function onEdit(e){
 
   // Only grant permissions if set this array
   if(columnsToGiveAccess.length > 0) {
-    if(grantPermission(e, columnsToGiveAccess)) {
-      unprotectRange(columnsToGiveAccess, e); //Set as unprotected in main sheet
+    if(grantPermission(columnsToGiveAccess, e)) {
+      unprotectRange(columnsToGiveAccess,e); //Set as unprotected in main sheet
       // Popping the last two columns (Use as extra - should not be displayed)
       columnsToGiveAccess.pop();
       columnsToGiveAccess.pop();
       showAlert(accessGranted, editableColumns + columnsToGiveAccess.toString());
     }
   }
+  Logger.log("Finished");
 }
+
+
+/**
+ * Test function for onEdit. Passes an event object to simulate an edit to
+ * a cell in a spreadsheet.
+ * Check for updates: https://stackoverflow.com/a/16089067/1677912
+ */
+function test_onEdit() {
+  Logger.log("OnEdit");
+  onEditAsAdmin({
+    user : Session.getActiveUser().getEmail(),
+    source : SpreadsheetApp.getActiveSpreadsheet(),
+    range : SpreadsheetApp.getActiveSpreadsheet().getActiveCell(),
+    value : SpreadsheetApp.getActiveSpreadsheet().getActiveCell().getValue(),
+    authMode : "LIMITED"
+  });
+  Logger.log("OnEdit Finished");
+}
+
+
+/*
+// Don't use onEdit as it runs as the current logged in user and does not run when Anonymous user enters the sheet
+function onEdit(e){
+
+}
+*/ 
 
   // This function prevents cells from being updated. When a user edits a cell on the master sheet,
   // it is checked against the same cell on a helper sheet. If the value on the helper sheet is
@@ -125,17 +145,10 @@ function onEdit(e){
 function checkIfHasAccess(e) {
   var row = e.range.getRow();
   
-  if(row.getColumn == fillerEmailField || row.getColumn == communityCommentsField) {
-   return true; //Anyone can edit the filler email field 
-  }
-
-  var fillerEmailContent = getCellContent(fillerEmailCol + row);
-  
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var masterSheet = ss.getActiveSheet();
   var masterRange = masterSheet.getActiveRange();
   
-  Logger.log(masterRange.getHeight());
   if(masterRange.getHeight() > 1) {
     undoActiveRange();
     showAlert("Can\'t edit","Please edit one line at a time");
@@ -148,20 +161,10 @@ function checkIfHasAccess(e) {
   var oldValue = helperRange.getValues();
   Logger.log("newValue " + newValue);
   Logger.log("oldValue " + oldValue);
- 
-  var errorText = "";
-  if (fillerEmailContent == "") {
-    errorText = "This task doesn\'t have filler email yet";
-  }
-  
-  if(errorText) { 
-    undoActiveRange();
-    showAlert("Can\'t edit",errorText);
-    return false;
-  }
   
   // Apply changes to backup sheet
-  helperRange.setValues(newValue);
+  helperRange.setValues(newValue); 
+
   return true;
 }
 
@@ -176,7 +179,7 @@ function undoActiveRange() {
   masterRange.setValues(oldValue);
 }
 
-function grantPermission(e, columnsToGiveAccess) {
+function grantPermission(columnsToGiveAccess, e) {
   Logger.log("Granting permission");
   var newValue = e.range.getValue(); //Better this then e.value which on copy return other results
   Logger.log("Value:" + e.value);
@@ -188,7 +191,6 @@ function grantPermission(e, columnsToGiveAccess) {
     showAlert("",invalidEmail + newValue + emailMustBe);
     return false;
   }
-  
   if(showYesNoCancel(isEmailCorrect,newValue) != ui.Button.YES) {
     e.range.setValue(e.oldValue || '');
     return false;
@@ -207,12 +209,6 @@ function grantPermission(e, columnsToGiveAccess) {
   }
   Logger.log("Granted permission successfully");
   return true;
-}
-
-// Set all the needed unprotected columns
-function testUnprotectEmptycolumns() {
-  var columnsToUnprotect = [communityCommentsCol, contactsCol, fillerEmailCol];
-  unprotectRange(columnsToUnprotect);
 }
 
 function unprotectRange(columnsToGiveAccess, e) {  
